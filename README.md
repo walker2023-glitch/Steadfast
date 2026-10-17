@@ -15,6 +15,15 @@ Steadfast is a private, relationship-centered planner for living with purpose. I
 
 This is intentionally a local-first UI prototype. Authentication, database persistence, synchronization, calendar integrations, and native packaging are planned but not yet implemented.
 
+## Cloud foundation (not yet active)
+
+The database schema, Row Level Security, and Supabase client scaffolding for the
+private roommate beta live under [`supabase/`](./supabase/) and
+`src/lib/supabaseClient.js`. They are **not** wired into the running app yet —
+Steadfast still persists to `localStorage` via the `Store` layer. See
+[`supabase/README.md`](./supabase/README.md) and
+[`docs/SHARED_APP_ARCHITECTURE.md`](./docs/SHARED_APP_ARCHITECTURE.md).
+
 ## Run locally
 
 ```bash
