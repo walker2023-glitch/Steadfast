@@ -3,6 +3,13 @@
 (() => {
   'use strict';
 
+  // ─── Build marker ────────────────────────────────────────────
+  // Bump this (and the ?v= query in index.html) when shipping changes.
+  // Verify the browser loaded the latest file by checking this in the console.
+  const APP_VERSION = '1.0.0';
+  window.STEADFAST_BUILD = APP_VERSION;
+  console.info(`Steadfast app.js v${APP_VERSION} loaded`);
+
   // ─── Constants ───────────────────────────────────────────────
   const STORAGE_KEYS = {
     events: 'steadfast-events-v2',
@@ -24,9 +31,15 @@
   const STATUS = {
     planned: { label: 'Planned', icon: '○' },
     completed: { label: 'Completed', icon: '✓' },
-    missed: { label: 'Missed', icon: '!' },
-    canceled: { label: 'Canceled', icon: '×' },
+    skipped: { label: 'Skipped', icon: '–' },
   };
+
+  // Map legacy statuses from earlier versions onto the current set.
+  function normalizeStatus(status) {
+    if (STATUS[status]) return status;
+    if (status === 'missed' || status === 'canceled') return 'skipped';
+    return 'planned';
+  }
 
   const RECURRENCE = [
     { id: 'none', label: 'Does not repeat' },
@@ -337,6 +350,7 @@
       phone: '⌕',
       mail: '✉',
       missed: '!',
+      skip: '–',
       repeat: '⇄',
       location: '⌖',
       note: '✎',
@@ -418,7 +432,7 @@
       personIds: Array.isArray(e.personIds) ? e.personIds.map(String) : [],
       goalIds: Array.isArray(e.goalIds) ? e.goalIds.map(String) : [],
       followUp: e.followUp || '',
-      status: STATUS[e.status] ? e.status : 'planned',
+      status: normalizeStatus(e.status),
       recurrence: e.recurrence || 'none',
       createdAt: e.createdAt || new Date().toISOString(),
       updatedAt: e.updatedAt || new Date().toISOString(),
@@ -563,7 +577,6 @@
 
   // ─── Event queries ───────────────────────────────────────────
   function eventOccursOn(event, iso) {
-    if (event.status === 'canceled' && event.date !== iso) return false;
     if (event.date === iso) return true;
     if (!event.recurrence || event.recurrence === 'none') return false;
     const start = parseISODate(event.date);
@@ -701,7 +714,7 @@
   function weekProgress() {
     const start = startOfWeek(todayISO());
     const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
-    const weekEvents = days.flatMap((d) => eventsForDate(d)).filter((e) => e.status !== 'canceled');
+    const weekEvents = days.flatMap((d) => eventsForDate(d));
     if (!weekEvents.length) return 0;
     const done = weekEvents.filter((e) => e.status === 'completed').length;
     return Math.round((done / weekEvents.length) * 100);
@@ -725,7 +738,7 @@
       render();
     });
     document.querySelector('#fab-add')?.addEventListener('click', () => openEventForm());
-    document.querySelectorAll('#add-event, #empty-add').forEach((btn) => {
+    document.querySelectorAll('#add-event, #empty-add, [data-add-event]').forEach((btn) => {
       btn.addEventListener('click', () => openEventForm());
     });
     document.querySelectorAll('#weekly-review, #weekly-review-btn, [data-action="weekly-review"]').forEach((btn) => {
@@ -851,9 +864,10 @@
                   .join('')}
               </div>
               <div class="month-controls">
-                <button type="button" data-nav="-1" aria-label="Previous">${icon('left')}</button>
-                <button type="button" data-nav="1" aria-label="Next">${icon('right')}</button>
+                <button type="button" data-nav="-1" aria-label="Previous ${calendarView}">${icon('left')}</button>
+                <button type="button" data-nav="1" aria-label="Next ${calendarView}">${icon('right')}</button>
               </div>
+              <button type="button" class="primary-button toolbar-add" data-add-event>${icon('plus')} Add activity</button>
             </div>
           </div>
           ${calendarView === 'month' ? monthView() : calendarView === 'week' ? weekView() : dayView()}
@@ -878,7 +892,7 @@
           .map((day) => {
             if (!day) return `<div class="calendar-day blank" role="gridcell"></div>`;
             const date = `${year}-${pad(month + 1)}-${pad(day)}`;
-            const dayEvents = eventsForDate(date).filter((e) => e.status !== 'canceled');
+            const dayEvents = eventsForDate(date);
             const visible = dayEvents.slice(0, 3);
             const more = dayEvents.length - visible.length;
             return `
@@ -935,7 +949,7 @@
           <div class="all-day-cols">
             ${days
               .map((iso) => {
-                const allDay = eventsForDate(iso).filter((e) => e.allDay && e.status !== 'canceled');
+                const allDay = eventsForDate(iso).filter((e) => e.allDay);
                 return `
                   <div class="all-day-col ${iso === today ? 'is-today' : ''} ${iso === selectedDate ? 'is-selected' : ''}" data-date="${iso}">
                     ${allDay
@@ -956,7 +970,7 @@
           <div class="week-columns">
             ${days
               .map((iso) => {
-                const dayEvents = eventsForDate(iso).filter((e) => !e.allDay && e.status !== 'canceled');
+                const dayEvents = eventsForDate(iso).filter((e) => !e.allDay);
                 const laid = layoutTimedEvents(dayEvents);
                 return `
                   <div class="week-col ${iso === today ? 'is-today' : ''} ${iso === selectedDate ? 'is-selected' : ''}" data-date="${iso}" data-open-day="1">
@@ -991,8 +1005,8 @@
 
   function dayView() {
     const dayEvents = eventsForDate(selectedDate);
-    const allDay = dayEvents.filter((e) => e.allDay && e.status !== 'canceled');
-    const timed = dayEvents.filter((e) => !e.allDay && e.status !== 'canceled');
+    const allDay = dayEvents.filter((e) => e.allDay);
+    const timed = dayEvents.filter((e) => !e.allDay);
     const laid = layoutTimedEvents(timed);
     const hours = Array.from({ length: HOUR_END - HOUR_START }, (_, i) => HOUR_START + i);
 
@@ -1186,7 +1200,7 @@
             event.status === 'planned'
               ? `
             <button type="button" class="check-button done" data-status-quick="${event.id}" data-status-value="completed" aria-label="Mark completed" title="Complete">${icon('check')}</button>
-            <button type="button" class="check-button miss" data-status-quick="${event.id}" data-status-value="missed" aria-label="Mark missed" title="Missed">${icon('missed')}</button>`
+            <button type="button" class="check-button skip" data-status-quick="${event.id}" data-status-value="skipped" aria-label="Mark skipped" title="Skip">${icon('skip')}</button>`
               : `<span class="status-badge static" aria-label="${STATUS[event.status].label}">${STATUS[event.status].icon}</span>`
           }
         </div>
@@ -1323,7 +1337,7 @@
             event.status === 'planned'
               ? `
             <button type="button" class="primary-button" data-set-status="completed">${icon('check')} Complete</button>
-            <button type="button" class="secondary-button" data-set-status="missed">Missed</button>`
+            <button type="button" class="secondary-button" data-set-status="skipped">Skip</button>`
               : `<button type="button" class="secondary-button" data-set-status="planned">Mark planned</button>`
           }
           <button type="button" class="secondary-button" data-reschedule>Reschedule</button>
@@ -1583,6 +1597,8 @@
           </div>
         </details>
 
+        <p class="form-error" data-error role="alert" hidden></p>
+
         <div class="form-footer">
           ${
             isEdit
@@ -1621,15 +1637,40 @@
       }
     });
 
+    const errorEl = form.querySelector('[data-error]');
+    const showError = (message, fieldName) => {
+      errorEl.textContent = message;
+      errorEl.hidden = false;
+      if (fieldName) form.querySelector(`[name="${fieldName}"]`)?.focus();
+    };
+
     form.onsubmit = (e) => {
       e.preventDefault();
+      errorEl.hidden = true;
       const fd = new FormData(form);
       const title = String(fd.get('title') || '').trim();
       if (!title) {
-        form.querySelector('[name="title"]').focus();
+        showError('Give this activity a title.', 'title');
+        return;
+      }
+      const date = String(fd.get('date') || '');
+      if (!date) {
+        showError('Choose a date for this activity.', 'date');
         return;
       }
       const allDay = fd.get('allDay') === 'on';
+      if (!allDay) {
+        const start = String(fd.get('startTime') || '');
+        const end = String(fd.get('endTime') || '');
+        if (!start || !end) {
+          showError('Add a start and end time, or mark it all day.', !start ? 'startTime' : 'endTime');
+          return;
+        }
+        if (timeToMinutes(end) <= timeToMinutes(start)) {
+          showError('End time must be after the start time.', 'endTime');
+          return;
+        }
+      }
       const category = String(fd.get('category'));
       const personIds = [...form.querySelector('[name="personIds"]').selectedOptions].map(
         (o) => o.value
@@ -1700,7 +1741,7 @@
     const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
     const weekEvents = days.flatMap((d) => eventsForDate(d));
     const completed = weekEvents.filter((e) => e.status === 'completed');
-    const missed = weekEvents.filter((e) => e.status === 'missed');
+    const skipped = weekEvents.filter((e) => e.status === 'skipped');
     const planned = weekEvents.filter((e) => e.status === 'planned');
     const unplannedDays = days.filter((d) => eventsForDate(d).length === 0);
     const connectedPeople = [
@@ -1736,7 +1777,7 @@
 
         <div class="review-stats">
           <div class="stat"><strong>${completed.length}</strong><span>Completed</span></div>
-          <div class="stat"><strong>${missed.length}</strong><span>Missed</span></div>
+          <div class="stat"><strong>${skipped.length}</strong><span>Skipped</span></div>
           <div class="stat"><strong>${planned.length}</strong><span>Still planned</span></div>
           <div class="stat"><strong>${unplannedDays.length}</strong><span>Open days</span></div>
         </div>
@@ -1756,14 +1797,14 @@
             </ul>
           </div>
           <div>
-            <h3>What was missed?</h3>
+            <h3>What was skipped?</h3>
             <ul class="review-list">
               ${
-                missed.length
-                  ? missed
+                skipped.length
+                  ? skipped
                       .map((e) => `<li><span class="dot ${e.color}"></span>${escapeHtml(e.title)}</li>`)
                       .join('')
-                  : '<li class="muted">Nothing marked missed.</li>'
+                  : '<li class="muted">Nothing marked skipped.</li>'
               }
             </ul>
           </div>

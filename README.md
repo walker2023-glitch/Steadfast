@@ -7,7 +7,8 @@ Steadfast is a private, relationship-centered planner for living with purpose. I
 - Responsive Steadfast app shell (navy / teal design system)
 - Month, week, and day calendar views with navigation and Today
 - Missionary-inspired planning workflow: what, who, why, goals, outcome, next
-- Event create/edit with people, goals, status, recurrence, and follow-ups
+- Event create/edit/delete with people, goals, recurrence, and follow-ups
+- Activity statuses: planned, completed, skipped (with form validation)
 - Day panel companion: plans, people, goals, follow-ups, weekly review
 - Weekly review for completed/missed plans and next-week carryover
 - People and goals views with local persistence (localStorage)
@@ -20,6 +21,8 @@ This is intentionally a local-first UI prototype. Authentication, database persi
 npm run dev
 ```
 
-Then open `http://localhost:4173`. The current prototype has no package dependencies; this keeps the first demo easy to run while the product workflow is being validated.
+Then open `http://localhost:4173`. The dev server (`server.js`) is a tiny, dependency-free Node static server that sends `Cache-Control: no-store`, so JavaScript and CSS edits are never served stale during development. Only Node is required.
+
+`index.html` also loads `app.js`/`styles.css` with a fixed `?v=` version string; bump it when shipping changes so production caches update without disabling caching entirely.
 
 See [`STEADFAST_IMPLEMENTATION_PLAN.md`](./STEADFAST_IMPLEMENTATION_PLAN.md) for the full roadmap.

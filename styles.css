@@ -264,6 +264,11 @@ nav { display: grid; gap: 5px; }
   color: var(--navy);
   box-shadow: 0 1px 3px rgba(23, 63, 95, 0.12);
 }
+.toolbar-add {
+  padding: 8px 12px;
+  min-height: 36px;
+  font-size: 13px;
+}
 .month-controls { display: flex; gap: 6px; }
 .month-controls button,
 .icon-button {
@@ -362,7 +367,7 @@ nav { display: grid; gap: 5px; }
 .event-chip.gold { background: var(--gold-bg); }
 .event-chip.gold .chip-bar { background: var(--gold); }
 .event-chip.status-completed { opacity: 0.7; }
-.event-chip.status-missed { opacity: 0.65; text-decoration: line-through; }
+.event-chip.status-skipped { opacity: 0.6; text-decoration: line-through; }
 .event-more {
   font-size: 10px;
   color: var(--muted);
@@ -540,8 +545,7 @@ nav { display: grid; gap: 5px; }
 .timed-event.purple { background: var(--purple-bg); border-color: var(--purple); }
 .timed-event.gold { background: var(--gold-bg); border-color: var(--gold); }
 .timed-event.status-completed { opacity: 0.72; }
-.timed-event.status-missed { opacity: 0.65; }
-.timed-event.status-canceled { opacity: 0.45; text-decoration: line-through; }
+.timed-event.status-skipped { opacity: 0.6; text-decoration: line-through; }
 .te-title {
   font-size: 12px;
   font-weight: 700;
@@ -584,9 +588,9 @@ nav { display: grid; gap: 5px; }
   background: var(--mint-strong);
   color: #fff;
 }
-.timed-event.status-missed .status-badge,
-.event-card.status-missed .status-badge {
-  background: var(--danger);
+.timed-event.status-skipped .status-badge,
+.event-card.status-skipped .status-badge {
+  background: var(--muted);
   color: #fff;
 }
 .timed-event.status-planned .status-badge {
@@ -688,7 +692,7 @@ nav { display: grid; gap: 5px; }
 .event-card.gold { border-color: var(--gold); }
 .event-card.purple { border-color: var(--purple); }
 .event-card.status-completed { opacity: 0.75; }
-.event-card.status-missed { opacity: 0.7; }
+.event-card.status-skipped { opacity: 0.7; }
 .event-time { color: #b6cbd5; font-size: 11px; width: 44px; flex: 0 0 auto; }
 .event-main { min-width: 0; flex: 1; }
 .event-main strong,
@@ -714,7 +718,7 @@ nav { display: grid; gap: 5px; }
   background: transparent;
 }
 .check-button.done:hover { background: var(--mint-strong); color: #fff; border-color: transparent; }
-.check-button.miss:hover { background: var(--danger); color: #fff; border-color: transparent; }
+.check-button.skip:hover { background: var(--muted); color: #fff; border-color: transparent; }
 
 .goals-label { margin-top: 28px; }
 .goal-list { display: grid; gap: 10px; }
@@ -968,6 +972,17 @@ nav { display: grid; gap: 5px; }
   color: var(--muted);
   font-size: 11px;
 }
+.form-error {
+  margin: 16px 0 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #fdf2f2;
+  border: 1px solid #e8c4c4;
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 600;
+}
+.form-error[hidden] { display: none; }
 .more-fields {
   margin-top: 18px;
   border: 1px solid var(--line);
