@@ -145,6 +145,17 @@ nav { display: grid; gap: 5px; }
 .avatar.large { width: 44px; height: 44px; font-size: 17px; }
 .avatar.tiny { width: 22px; height: 22px; font-size: 11px; }
 
+.workspace-tools {
+  padding: 8px;
+  margin-top: 4px;
+}
+.workspace-tools .eyebrow { display: block; margin-bottom: 4px; }
+.workspace-actions {
+  display: flex;
+  gap: 14px;
+}
+.workspace-actions .text-link { padding: 4px 0; }
+
 .main-content {
   flex: 1;
   max-width: 1460px;

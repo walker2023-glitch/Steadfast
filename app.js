@@ -11,13 +11,33 @@
   console.info(`Steadfast app.js v${APP_VERSION} loaded`);
 
   // ─── Constants ───────────────────────────────────────────────
+  // Active (v3) storage keys. Records now carry ownerId/householdId/visibility.
   const STORAGE_KEYS = {
-    events: 'steadfast-events-v2',
-    people: 'steadfast-people-v2',
-    goals: 'steadfast-goals-v2',
-    followUps: 'steadfast-followups-v2',
-    reviews: 'steadfast-reviews-v2',
-    prefs: 'steadfast-prefs-v2',
+    events: 'steadfast-events-v3',
+    people: 'steadfast-people-v3',
+    goals: 'steadfast-goals-v3',
+    followUps: 'steadfast-followups-v3',
+    reviews: 'steadfast-reviews-v3',
+    prefs: 'steadfast-prefs-v3',
+  };
+
+  // Older keys we migrate FORWARD from, newest first. We never delete these,
+  // so existing data stays recoverable after the v3 upgrade.
+  const LEGACY_KEYS = {
+    events: ['steadfast-events-v2', 'steadfast-events'],
+    people: ['steadfast-people-v2', 'steadfast-people'],
+    goals: ['steadfast-goals-v2', 'steadfast-goals'],
+    followUps: ['steadfast-followups-v2'],
+    reviews: ['steadfast-reviews-v2'],
+    prefs: ['steadfast-prefs-v2'],
+  };
+
+  // The current local (pre-cloud) user/workspace identity. When auth + cloud
+  // arrive, these defaults are replaced by the signed-in user and household.
+  const LOCAL_IDENTITY = {
+    ownerId: 'local-user',
+    householdId: 'local-household',
+    visibility: 'private',
   };
 
   const CATEGORIES = [
@@ -253,8 +273,16 @@
   // ─── Utilities ───────────────────────────────────────────────
   const pad = (n) => String(n).padStart(2, '0');
 
+  // Collision-safe IDs. Prefer crypto.randomUUID(); keep the readable prefix
+  // so new IDs (e.g. "evt-<uuid>") stay debuggable and old IDs remain valid.
   function uid(prefix) {
-    return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const id =
+      typeof globalThis !== 'undefined' &&
+      globalThis.crypto &&
+      typeof globalThis.crypto.randomUUID === 'function'
+        ? globalThis.crypto.randomUUID()
+        : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    return prefix ? `${prefix}-${id}` : id;
   }
 
   function todayISO() {
@@ -362,25 +390,68 @@
       month: '▦',
     }[name] || '•');
 
-  // ─── Safe persistence ────────────────────────────────────────
-  function loadJSON(key, fallback) {
-    try {
-      const raw = localStorage.getItem(key);
-      if (raw == null) return fallback;
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) || (parsed && typeof parsed === 'object') ? parsed : fallback;
-    } catch {
-      return fallback;
-    }
-  }
+  // ─── Storage layer ───────────────────────────────────────────
+  // The ONLY code that talks to localStorage. The rest of the app goes through
+  // this seam, so a future CloudStore (Supabase) can replace it without
+  // touching any UI or domain logic. See docs/SHARED_APP_ARCHITECTURE.md.
+  const Store = {
+    workspaceVersion: 3,
+    backupKey: 'steadfast-backup-v3',
 
-  function saveJSON(key, value) {
-    try {
-      localStorage.setItem(key, JSON.stringify(value));
-    } catch (err) {
-      console.warn('Steadfast: could not save', key, err);
-    }
-  }
+    read(key, fallback) {
+      try {
+        const raw = localStorage.getItem(key);
+        if (raw == null) return fallback;
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) || (parsed && typeof parsed === 'object')
+          ? parsed
+          : fallback;
+      } catch {
+        return fallback;
+      }
+    },
+
+    write(key, value) {
+      try {
+        localStorage.setItem(key, JSON.stringify(value));
+        return true;
+      } catch (err) {
+        console.warn('Steadfast: could not save', key, err);
+        return false;
+      }
+    },
+
+    // Load a collection: prefer the active key, else migrate forward from the
+    // first non-empty legacy key (leaving legacy data untouched), else seed.
+    loadCollection(key, legacyKeys, seed, normalizer, migrator) {
+      const current = this.read(key, null);
+      if (Array.isArray(current)) return current.map(normalizer);
+      for (const legacyKey of legacyKeys || []) {
+        const legacy = this.read(legacyKey, null);
+        if (Array.isArray(legacy) && legacy.length) {
+          const migrated = migrator ? migrator(legacy) : legacy.map(normalizer);
+          this.write(key, migrated); // write v3; legacy key is preserved
+          return migrated;
+        }
+      }
+      return seed.map(normalizer);
+    },
+
+    // Load the prefs object (not a record collection, so no identity fields).
+    loadPrefs(key, legacyKeys, defaults) {
+      const current = this.read(key, null);
+      if (current && typeof current === 'object') return { ...defaults, ...current };
+      for (const legacyKey of legacyKeys || []) {
+        const legacy = this.read(legacyKey, null);
+        if (legacy && typeof legacy === 'object') {
+          const merged = { ...defaults, ...legacy };
+          this.write(key, merged);
+          return merged;
+        }
+      }
+      return { ...defaults };
+    },
+  };
 
   function migrateLegacyEvents(list, peopleList) {
     if (!Array.isArray(list)) return [];
@@ -437,6 +508,9 @@
       createdAt: e.createdAt || new Date().toISOString(),
       updatedAt: e.updatedAt || new Date().toISOString(),
       isSeed: !!e.isSeed,
+      ownerId: e.ownerId || LOCAL_IDENTITY.ownerId,
+      householdId: e.householdId || LOCAL_IDENTITY.householdId,
+      visibility: e.visibility || LOCAL_IDENTITY.visibility,
     };
   }
 
@@ -450,6 +524,9 @@
       email: p.email || '',
       note: p.note || '',
       isSeed: !!p.isSeed,
+      ownerId: p.ownerId || LOCAL_IDENTITY.ownerId,
+      householdId: p.householdId || LOCAL_IDENTITY.householdId,
+      visibility: p.visibility || LOCAL_IDENTITY.visibility,
     };
   }
 
@@ -464,6 +541,9 @@
       color: g.color === 'green' ? 'mint' : g.color || 'blue',
       status: g.status || 'active',
       isSeed: !!g.isSeed,
+      ownerId: g.ownerId || LOCAL_IDENTITY.ownerId,
+      householdId: g.householdId || LOCAL_IDENTITY.householdId,
+      visibility: g.visibility || LOCAL_IDENTITY.visibility,
     };
   }
 
@@ -478,57 +558,197 @@
       priority: f.priority || 'normal',
       status: f.status || 'open',
       isSeed: !!f.isSeed,
+      ownerId: f.ownerId || LOCAL_IDENTITY.ownerId,
+      householdId: f.householdId || LOCAL_IDENTITY.householdId,
+      visibility: f.visibility || LOCAL_IDENTITY.visibility,
     };
   }
 
-  // Load: prefer v2; fall back to legacy keys without overwriting user data
-  function loadCollection(v2Key, legacyKey, seed, normalizer, migrator) {
-    const v2 = loadJSON(v2Key, null);
-    if (Array.isArray(v2)) return v2.map(normalizer);
-
-    const legacy = loadJSON(legacyKey, null);
-    if (Array.isArray(legacy) && legacy.length) {
-      const migrated = (migrator ? migrator(legacy) : legacy.map(normalizer));
-      saveJSON(v2Key, migrated);
-      return migrated;
-    }
-
-    return seed.map(normalizer);
+  function normalizeReview(r) {
+    return {
+      id: String(r.id || uid('rev')),
+      weekStart: r.weekStart || todayISO(),
+      carry: r.carry || '',
+      savedAt: r.savedAt || new Date().toISOString(),
+      ownerId: r.ownerId || LOCAL_IDENTITY.ownerId,
+      householdId: r.householdId || LOCAL_IDENTITY.householdId,
+      visibility: r.visibility || LOCAL_IDENTITY.visibility,
+    };
   }
 
-  let people = loadCollection(STORAGE_KEYS.people, 'steadfast-people', seedPeople, normalizePerson);
-  let goals = loadCollection(STORAGE_KEYS.goals, 'steadfast-goals', seedGoals, normalizeGoal);
-  let followUps = loadCollection(
+  // Load each collection through the Store seam (v3 → legacy migration → seed).
+  // People load first because event migration maps legacy person names to ids.
+  let people = Store.loadCollection(
+    STORAGE_KEYS.people,
+    LEGACY_KEYS.people,
+    seedPeople,
+    normalizePerson
+  );
+  let goals = Store.loadCollection(
+    STORAGE_KEYS.goals,
+    LEGACY_KEYS.goals,
+    seedGoals,
+    normalizeGoal
+  );
+  let followUps = Store.loadCollection(
     STORAGE_KEYS.followUps,
-    null,
+    LEGACY_KEYS.followUps,
     seedFollowUps,
     normalizeFollowUp
   );
-  let events = (() => {
-    const v2 = loadJSON(STORAGE_KEYS.events, null);
-    if (Array.isArray(v2)) return v2.map(normalizeEvent);
-    const legacy = loadJSON('steadfast-events', null);
-    if (Array.isArray(legacy) && legacy.length) {
-      const migrated = migrateLegacyEvents(legacy, people);
-      saveJSON(STORAGE_KEYS.events, migrated);
-      return migrated;
-    }
-    return seedEvents.map(normalizeEvent);
-  })();
-  let reviews = loadJSON(STORAGE_KEYS.reviews, []);
+  let events = Store.loadCollection(
+    STORAGE_KEYS.events,
+    LEGACY_KEYS.events,
+    seedEvents,
+    normalizeEvent,
+    (legacy) => migrateLegacyEvents(legacy, people)
+  );
+  let reviews = Store.loadCollection(
+    STORAGE_KEYS.reviews,
+    LEGACY_KEYS.reviews,
+    [],
+    normalizeReview
+  );
 
-  const prefs = {
-    view: 'month',
-    ...loadJSON(STORAGE_KEYS.prefs, {}),
-  };
+  const prefs = Store.loadPrefs(STORAGE_KEYS.prefs, LEGACY_KEYS.prefs, { view: 'month' });
 
   function persistAll() {
-    saveJSON(STORAGE_KEYS.events, events);
-    saveJSON(STORAGE_KEYS.people, people);
-    saveJSON(STORAGE_KEYS.goals, goals);
-    saveJSON(STORAGE_KEYS.followUps, followUps);
-    saveJSON(STORAGE_KEYS.reviews, reviews);
-    saveJSON(STORAGE_KEYS.prefs, prefs);
+    Store.write(STORAGE_KEYS.events, events);
+    Store.write(STORAGE_KEYS.people, people);
+    Store.write(STORAGE_KEYS.goals, goals);
+    Store.write(STORAGE_KEYS.followUps, followUps);
+    Store.write(STORAGE_KEYS.reviews, reviews);
+    Store.write(STORAGE_KEYS.prefs, prefs);
+  }
+
+  // ─── Workspace export / import (local backup + portability) ───
+  // Build a self-describing snapshot of the whole local workspace.
+  function buildWorkspace() {
+    return {
+      app: 'steadfast',
+      type: 'steadfast-workspace',
+      version: Store.workspaceVersion,
+      exportedAt: new Date().toISOString(),
+      identity: { ...LOCAL_IDENTITY },
+      data: { events, people, goals, followUps, reviews, prefs },
+    };
+  }
+
+  // Validate a parsed object before it is allowed to replace anything.
+  // Returns an array of human-readable problems (empty = valid).
+  function validateWorkspace(obj) {
+    const problems = [];
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+      return ['The file is not a Steadfast workspace.'];
+    }
+    if (obj.type !== 'steadfast-workspace') {
+      problems.push('Missing Steadfast workspace marker.');
+    }
+    if (!obj.data || typeof obj.data !== 'object' || Array.isArray(obj.data)) {
+      problems.push('Missing or invalid "data" section.');
+      return problems;
+    }
+    ['events', 'people', 'goals', 'followUps', 'reviews'].forEach((k) => {
+      if (!Array.isArray(obj.data[k])) problems.push(`"${k}" must be a list.`);
+    });
+    if (
+      obj.data.prefs != null &&
+      (typeof obj.data.prefs !== 'object' || Array.isArray(obj.data.prefs))
+    ) {
+      problems.push('"prefs" must be an object.');
+    }
+    return problems;
+  }
+
+  // Save the current workspace to a backup key so an import can be undone.
+  function backupCurrentWorkspace() {
+    return Store.write(Store.backupKey, {
+      ...buildWorkspace(),
+      backupReason: 'pre-import',
+    });
+  }
+
+  // Replace in-memory state from a validated workspace, then persist.
+  function applyWorkspace(obj) {
+    const d = obj.data;
+    events = (d.events || []).map(normalizeEvent);
+    people = (d.people || []).map(normalizePerson);
+    goals = (d.goals || []).map(normalizeGoal);
+    followUps = (d.followUps || []).map(normalizeFollowUp);
+    reviews = (d.reviews || []).map(normalizeReview);
+    if (d.prefs && typeof d.prefs === 'object') {
+      Object.keys(prefs).forEach((k) => delete prefs[k]);
+      Object.assign(prefs, { view: 'month' }, d.prefs);
+    }
+    persistAll();
+  }
+
+  function exportWorkspace() {
+    const workspace = buildWorkspace();
+    const blob = new Blob([JSON.stringify(workspace, null, 2)], {
+      type: 'application/json',
+    });
+    const url = URL.createObjectURL(blob);
+    const stamp = new Date().toISOString().slice(0, 10);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `steadfast-workspace-${stamp}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  function openImportDialog() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'application/json,.json';
+    input.addEventListener('change', () => {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        let parsed;
+        try {
+          parsed = JSON.parse(String(reader.result));
+        } catch {
+          alert('Import failed: the file is not valid JSON.');
+          return;
+        }
+        const problems = validateWorkspace(parsed);
+        if (problems.length) {
+          alert(`Import failed. The file is not a valid workspace:\n\n• ${problems.join('\n• ')}`);
+          return;
+        }
+        const d = parsed.data;
+        const summary = [
+          `${d.events.length} activities`,
+          `${d.people.length} people`,
+          `${d.goals.length} goals`,
+          `${d.followUps.length} follow-ups`,
+        ].join(', ');
+        if (
+          !confirm(
+            `Import will REPLACE your current workspace with:\n${summary}\n\n` +
+              'A backup of your current data is saved first so you can recover it. Continue?'
+          )
+        ) {
+          return;
+        }
+        if (!backupCurrentWorkspace()) {
+          if (!confirm('Could not save a backup. Import anyway?')) return;
+        }
+        applyWorkspace(parsed);
+        activeTab = 'Planner';
+        calendarView =
+          prefs.view === 'week' || prefs.view === 'day' ? prefs.view : 'month';
+        setSelectedDate(todayISO());
+        render();
+        alert('Import complete. Your previous data was backed up.');
+      };
+      reader.readAsText(file);
+    });
+    input.click();
   }
 
   // ─── App state ───────────────────────────────────────────────
@@ -552,7 +772,7 @@
   function setCalendarView(view) {
     calendarView = view;
     prefs.view = view;
-    saveJSON(STORAGE_KEYS.prefs, prefs);
+    Store.write(STORAGE_KEYS.prefs, prefs);
   }
 
   function goToday() {
@@ -691,6 +911,13 @@
               <span class="avatar">D</span>
               <span><strong>Dallas</strong><small>Personal space</small></span>
             </div>
+            <div class="workspace-tools">
+              <span class="eyebrow">WORKSPACE</span>
+              <div class="workspace-actions">
+                <button type="button" class="text-link" id="export-workspace">Export</button>
+                <button type="button" class="text-link" id="import-workspace">Import</button>
+              </div>
+            </div>
           </div>
         </aside>
         <main class="main-content">
@@ -729,6 +956,8 @@
       };
     });
     document.querySelector('#today')?.addEventListener('click', goToday);
+    document.querySelector('#export-workspace')?.addEventListener('click', exportWorkspace);
+    document.querySelector('#import-workspace')?.addEventListener('click', openImportDialog);
     document.querySelector('[data-action="toggle-nav"]')?.addEventListener('click', () => {
       mobileNavOpen = !mobileNavOpen;
       render();
@@ -1921,12 +2150,12 @@
       const carry = String(new FormData(e.target).get('carry') || '');
       reviews = [
         ...reviews.filter((r) => r.weekStart !== start),
-        {
+        normalizeReview({
           id: uid('rev'),
           weekStart: start,
           carry,
           savedAt: new Date().toISOString(),
-        },
+        }),
       ];
       persistAll();
       close();
