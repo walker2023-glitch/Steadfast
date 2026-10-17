@@ -1363,6 +1363,7 @@
     };
     overlay.querySelector('[data-delete]').onclick = () => {
       if (confirm('Delete this plan? This cannot be undone.')) {
+        releaseGoalProgressForEvent(event);
         events = events.filter((e) => e.id !== event.id);
         persistAll();
         close();
@@ -1426,6 +1427,17 @@
 
     persistAll();
     render();
+  }
+
+  // Keep goal progress consistent when a completed, goal-linked event is deleted.
+  function releaseGoalProgressForEvent(event) {
+    if (!event || event.status !== 'completed' || !Array.isArray(event.goalIds)) return;
+    event.goalIds.forEach((gid) => {
+      const gIdx = goals.findIndex((g) => g.id === gid);
+      if (gIdx >= 0 && goals[gIdx].progress > 0) {
+        goals[gIdx] = { ...goals[gIdx], progress: goals[gIdx].progress - 1 };
+      }
+    });
   }
 
   function createFollowUpFromEvent(event) {
@@ -1630,6 +1642,7 @@
 
     form.querySelector('[data-delete]')?.addEventListener('click', () => {
       if (confirm('Delete this plan? This cannot be undone.')) {
+        releaseGoalProgressForEvent(events.find((e) => e.id === draft.id));
         events = events.filter((e) => e.id !== draft.id);
         persistAll();
         close();
