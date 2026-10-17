@@ -4,12 +4,13 @@ Steadfast is a private, relationship-centered planner for living with purpose. I
 
 ## Current prototype
 
-- Responsive Steadfast app shell
-- Month calendar with selectable days
-- Day plan with seeded events and goals
-- Add-to-plan modal with local persistence
-- People view with notes and direct phone/email actions
-- Goals view with progress indicators
+- Responsive Steadfast app shell (navy / teal design system)
+- Month, week, and day calendar views with navigation and Today
+- Missionary-inspired planning workflow: what, who, why, goals, outcome, next
+- Event create/edit with people, goals, status, recurrence, and follow-ups
+- Day panel companion: plans, people, goals, follow-ups, weekly review
+- Weekly review for completed/missed plans and next-week carryover
+- People and goals views with local persistence (localStorage)
 
 This is intentionally a local-first UI prototype. Authentication, database persistence, synchronization, calendar integrations, and native packaging are planned but not yet implemented.
 
