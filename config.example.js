@@ -12,6 +12,6 @@
 // in this file. This file is NOT loaded by the app yet (foundation only).
 
 window.STEADFAST_ENV = {
-  SUPABASE_URL: '',
-  SUPABASE_ANON_KEY: '',
+  SUPABASE_URL: 'https://supabase.com/dashboard/project/ztiaulbbgyjexgzcrawq/settings/api-keys',
+  SUPABASE_ANON_KEY: 'sb_publishable_CoVLU0fB3VPpnXG9fYMHTg_lRV8_hBM',
 };
